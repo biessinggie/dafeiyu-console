@@ -1,0 +1,27 @@
+﻿# 构建产物
+console/bin/
+console/obj/
+console/app/
+*.user
+*.suo
+
+# 配置与密钥
+config.json
+config-group.json
+*.env
+
+# 运行时数据
+data/
+*.db
+*.log
+__pycache__/
+*.pyc
+
+# 形象图（CC BY-NC-SA，不入库，自行下载）
+头像/
+Assets/bg.png
+Assets/bg-light.png
+
+# 系统
+Thumbs.db
+desktop.ini

@@ -1,0 +1,43 @@
+{
+  "api": {
+    "base_url": "https://api.deepseek.com",
+    "api_key": "sk-你自己的key",
+    "model": "deepseek-flash",
+    "temperature": 1.0,
+    "max_tokens": 400
+  },
+  "onebot": {
+    "ws_url": "ws://127.0.0.1:3001",
+    "access_token": "和你NapCat里填的一样"
+  },
+  "bot": {
+    "name": "蓝",
+    "owners": ["你的QQ号"],
+    "reply_group": false,
+    "group_prob": 0.5,
+    "typing": true,
+    "split_reply": true,
+    "max_segments": 3,
+    "segment_chars": 45,
+    "merge_window": 1.5,
+    "history_turns": 12,
+    "memory_recall": 8,
+    "memory_every_turns": 12,
+    "rate_limit_per_min": 8,
+    "stickers_dir": "stickers",
+    "sticker_cooldown": 90,
+    "feed": {
+      "enabled": true,
+      "hours": [9, 23],
+      "min_gap_hours": 2.0,
+      "max_gap_hours": 5.0,
+      "max_per_day": 3
+    },
+    "proactive": {
+      "enabled": true,
+      "idle_hours": 6,
+      "hours": [20, 21, 22, 23],
+      "max_per_day": 2
+    }
+  }
+}
