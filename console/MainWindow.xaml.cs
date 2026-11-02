@@ -25,9 +25,217 @@ namespace DafeiyuConsole
     public partial class MainWindow : Window
     {
         static readonly string Root = FindRoot();
-        static readonly string ServerScript = Path.Combine(Root, "console_server.py");
-        static readonly string Python = @"C:\Program Files\Python38\pythonw.exe";
-        const string Api = "http://127.0.0.1:8771";
+        // ── 给设置窗口用的公开入口 ──
+        public static string RootDir => Root;
+        public static string PythonPath => Python;
+        public static int ApiPort => _ApiPort;
+        public static string PetExe => CfgString("pet_exe", "BigBlueFish.exe");
+        public static string NapcatBat
+        {
+            get
+            {
+                var cfg = CfgString("napcat_bat");
+                if (!string.IsNullOrEmpty(cfg)) return cfg;
+                var p = Path.Combine(Root, "..", "NapCat", "1-启动NapCat.bat");
+                return Path.GetFullPath(p);
+            }
+        }
+        static bool quietMode;
+        public static bool Quiet
+        {
+            get => quietMode;
+            set { quietMode = value; }
+        }
+        public static Action AvatarRefresh;
+        public static Action BackgroundRefresh;
+        public static void RequestAvatarRefresh() => AvatarRefresh?.Invoke();
+        public static void RequestBackgroundRefresh() => BackgroundRefresh?.Invoke();
+
+        // ── 用户环境配置（console.json，全都可以不填） ──
+        public static readonly string CfgPath = FindCfgPath();
+        static JsonElement? cfgEl;
+
+        static string FindCfgPath()
+        {
+            var env = Environment.GetEnvironmentVariable("DAFEIYU_CONSOLE_CFG");
+            if (!string.IsNullOrWhiteSpace(env) && File.Exists(env)) return env;
+            var p = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "console.json");
+            return File.Exists(p) ? p : "";
+        }
+
+        public static string CfgString(string key, string def = "")
+        {
+            try
+            {
+                if (cfgEl == null)
+                {
+                    if (string.IsNullOrEmpty(CfgPath) || !File.Exists(CfgPath)) { cfgEl = default; }
+                    else cfgEl = JsonDocument.Parse(File.ReadAllText(CfgPath)).RootElement.Clone();
+                }
+                if (cfgEl is JsonElement el && el.ValueKind == JsonValueKind.Object
+                    && el.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
+                {
+                    var s = v.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) return s;
+                }
+            }
+            catch { }
+            return def;
+        }
+
+        public static int CfgPort(string key, int def)
+        {
+            try
+            {
+                if (cfgEl == null) CfgString("_", "");   // 触发加载
+                if (cfgEl is JsonElement el && el.ValueKind == JsonValueKind.Object
+                    && el.TryGetProperty("ports", out var ports)
+                    && ports.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number)
+                    return v.GetInt32();
+            }
+            catch { }
+            return def;
+        }
+
+        static readonly string ServerScript = FindServerScript();
+        static readonly string Python = FindPython();
+        static readonly int _ApiPort = CfgPort("console", 8771);
+        static readonly string Api = "http://127.0.0.1:" + _ApiPort;
+
+        static bool ServerIsExe;
+        public static bool PythonFound;
+
+        static string FindServerScript()
+        {
+            // 打包版：console_server.exe，不需要装 Python
+            var exeCands = new[]
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "console_server.exe"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backend", "console_server.exe"),
+                Path.Combine(Root, "console_server.exe"),
+                Path.Combine(Root, "backend", "console_server.exe")
+            };
+            foreach (var e in exeCands)
+                if (File.Exists(e)) { ServerIsExe = true; return e; }
+
+            var cands = new[]
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "console_server.py"),
+                Path.Combine(Root, "console_server.py"),
+                Path.Combine(Root, "backend", "console_server.py"),
+                Path.Combine(Root, "console", "console_server.py")
+            };
+            foreach (var c in cands) if (File.Exists(c)) return c;
+            return cands[0];
+        }
+
+        static string FindPython()
+        {
+            // 1. 配置里写的
+            var cfg = CfgString("python");
+            if (!string.IsNullOrEmpty(cfg) && File.Exists(cfg)) { PythonFound = true; return cfg; }
+
+            // 2. 注册表（官方安装包都会写这里）
+            foreach (var root in new[]
+            {
+                @"SOFTWARE\\Python\\PythonCore",
+                @"SOFTWARE\\WOW6432Node\\Python\\PythonCore"
+            })
+            {
+                foreach (var hive in new[] { Microsoft.Win32.Registry.CurrentUser, Microsoft.Win32.Registry.LocalMachine })
+                {
+                    try
+                    {
+                        using var k = hive.OpenSubKey(root);
+                        if (k == null) continue;
+                        foreach (var ver in k.GetSubKeyNames().OrderByDescending(x => x))
+                        {
+                            using var ip = k.OpenSubKey(ver + @"\\InstallPath");
+                            var dir = ip?.GetValue("") as string ?? ip?.GetValue("ExecutablePath") as string;
+                            if (!string.IsNullOrEmpty(dir))
+                            {
+                                var d = dir.EndsWith(".exe") ? Path.GetDirectoryName(dir) : dir;
+                                foreach (var n in new[] { "pythonw.exe", "python.exe" })
+                                {
+                                    var exe = Path.Combine(d, n);
+                                    if (File.Exists(exe)) { PythonFound = true; return exe; }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            // 3. py 启动器（微软商店版也有）
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("py", "-3 -c \"import sys;print(sys.executable)\"")
+                {
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc != null)
+                {
+                    var outp = proc.StandardOutput.ReadToEnd().Trim();
+                    proc.WaitForExit(3000);
+                    if (!string.IsNullOrEmpty(outp) && File.Exists(outp))
+                    {
+                        var w = Path.Combine(Path.GetDirectoryName(outp), "pythonw.exe");
+                        PythonFound = true;
+                        return File.Exists(w) ? w : outp;
+                    }
+                }
+            }
+            catch { }
+
+            // 4. 常见安装位置
+            var names = new[] { "pythonw.exe", "python.exe" };
+            var bases = new List<string>
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "\\Programs\\Python",
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "C:/"
+            };
+            foreach (var b in bases)
+            {
+                try
+                {
+                    foreach (var d in Directory.GetDirectories(b, "Python3*").OrderByDescending(x => x))
+                        foreach (var n in names)
+                        {
+                            var exe = Path.Combine(d, n);
+                            if (File.Exists(exe)) { PythonFound = true; return exe; }
+                        }
+                }
+                catch { }
+            }
+
+            // 5. PATH
+            foreach (var n in names)
+            {
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo("where", n)
+                    {
+                        RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    if (proc == null) continue;
+                    var line = proc.StandardOutput.ReadToEnd().Split('\n').FirstOrDefault();
+                    proc.WaitForExit(2000);
+                    if (!string.IsNullOrWhiteSpace(line) && File.Exists(line.Trim()))
+                    { PythonFound = true; return line.Trim(); }
+                }
+                catch { }
+            }
+
+            // 6. 实在找不到
+            return "pythonw.exe";
+        }
+
 
         readonly HttpClient http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         readonly DispatcherTimer poll = new DispatcherTimer();
@@ -44,7 +252,6 @@ namespace DafeiyuConsole
         string lastLogText = null;
         string lastAvatar = "";
         string manualAvatar = null;
-        bool lightMode;
         double mood = 0;
         readonly List<(string key, string text, string icon, string hint, Action act)> keys;
 
@@ -54,9 +261,9 @@ namespace DafeiyuConsole
             keys = new List<(string, string, string, string, Action)>
             {
                 ("§运行", "", "", "", null),
-                ("start", "启动全部", "🚀", "F1", () => _ = StartFlowAsync()),
+                ("start", "启动全部", "🚀", "F1", () => { if (NeedPython()) _ = StartFlowAsync(); }),
                 ("qr", "刷新二维码", "📷", "F2", () => Action("qr")),
-                ("restart", "重启机器人", "🔄", "F3", () => Action("restart")),
+                ("restart", "重启机器人", "🔄", "F3", () => { if (NeedPython()) Action("restart"); }),
                 ("diag", "检测连接", "🩺", "F4", () => Action("diag")),
                 ("mode", "切换模式", "🔀", "F5", () => Action("mode")),
 
@@ -72,7 +279,6 @@ namespace DafeiyuConsole
                 ("stickers", "表情包", "😊", "F9", () => Action("stickers")),
                 ("folder", "程序目录", "📁", "F10", () => Action("folder")),
                 ("settings", "设置", "⚙️", "F11", OpenSettings),
-                ("quiet", "静音提醒", "🔕", "", ToggleNotify),
 
                 ("§暂停", "", "", "", null),
                 ("pause30", "休息 30 分钟", "🌙", "", () => Action("pause30")),
@@ -110,29 +316,31 @@ namespace DafeiyuConsole
             Loaded += (_, __) =>
             {
                 FadeIn(); Adapt();
+
                 var b = AppState.Load();
                 if (b != null && b.Width > 400)
                 {
                     Left = b.Left; Top = b.Top;
                     Width = b.Width; Height = b.Height;
-                    if (b.Light) { lightMode = true; ApplyTheme(true); ThemeBtn.Content = "🌙"; }
                 }
+
+                AvatarRefresh = () =>
+                {
+                    avatarCache.Clear();
+                    lastAvatar = "";
+                    manualAvatar = "avatar.png";
+                    UpdateAvatar(mood, wasOnline ?? false);
+                };
+                BackgroundRefresh = ReloadBackground;
+
+                FirstRunHint();
                 SetupTray();
-                if (Environment.GetCommandLineArgs().Contains("--danger"))
-                    Dispatcher.BeginInvoke(new Action(() => HardStop()));
             };
-            Closing += (_, __) => AppState.Save(this, lightMode);
-            SizeChanged += (_, __) => Adapt();
         }
 
-        // ── 基础 ──
         void LoadAssets()
         {
-            foreach (var dir in new[]
-            {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets"),
-                Path.Combine(Root, "console", "Assets")
-            })
+            foreach (var dir in AssetDirs())
             {
                 var bg = Path.Combine(dir, "bg.png");
                 if (File.Exists(bg))
@@ -142,28 +350,10 @@ namespace DafeiyuConsole
                         var bmp = new BitmapImage();
                         bmp.BeginInit();
                         bmp.CacheOption = BitmapCacheOption.OnLoad;
-                        bmp.DecodePixelWidth = 1280;
                         bmp.UriSource = new Uri(bg);
                         bmp.EndInit();
                         bmp.Freeze();
                         BgImage.Source = bmp;
-                    }
-                    catch { }
-                }
-                var art = Path.Combine(Root, "头像", "真身-右45.png");
-                if (!File.Exists(art)) art = Path.Combine(Root, "头像", "真身-正面.png");
-                if (File.Exists(art))
-                {
-                    try
-                    {
-                        var ab = new BitmapImage();
-                        ab.BeginInit();
-                        ab.CacheOption = BitmapCacheOption.OnLoad;
-                        ab.DecodePixelHeight = 1020;
-                        ab.UriSource = new Uri(art);
-                        ab.EndInit();
-                        ab.Freeze();
-                        HeroArt.Source = ab;
                     }
                     catch { }
                 }
@@ -240,16 +430,41 @@ namespace DafeiyuConsole
 
         static string FindRoot()
         {
+            // 0. console.json 里写的机器人目录
+            var cfgRoot = CfgString("bot_root");
+            if (!string.IsNullOrWhiteSpace(cfgRoot) && Directory.Exists(cfgRoot)) return cfgRoot;
+
+            // 1. 环境变量指定
+            var env = Environment.GetEnvironmentVariable("DAFEIYU_ROOT");
+            if (!string.IsNullOrWhiteSpace(env) && Directory.Exists(env)) return env;
+
+            // 2. 从 exe 目录往上找 config.json（机器人目录）
             var d = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
             for (int i = 0; i < 8 && d != null; i++)
             {
                 if (File.Exists(Path.Combine(d.FullName, "config.json"))) return d.FullName;
                 d = d.Parent;
             }
-            return @"E:\Dafeiyu\qq-companion";
+
+            // 3. 找不到就用 exe 自己所在目录（不再用"当前工作目录"，那个不可控）
+            return AppDomain.CurrentDomain.BaseDirectory;
         }
 
-        TrayIcon tray;
+        /// <summary>按顺序找资源目录：exe 目录 → 机器人根 → 根/console</summary>
+        static IEnumerable<string> AssetDirs()
+        {
+            yield return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets");
+            yield return Path.Combine(Root, "Assets");
+            yield return Path.Combine(Root, "console", "Assets");
+        }
+
+        /// <summary>按顺序找头像目录</summary>
+        static IEnumerable<string> AvatarDirs()
+        {
+            yield return Path.Combine(Root, "头像");
+            yield return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "头像");
+            yield return Path.Combine(Root, "console", "头像");
+        }
 
         static readonly string[] avatarViews = { "圆-正面.png", "圆-左45.png", "圆-右45.png", "圆-左侧.png", "圆-右前45.png" };
         int avatarIdx = -1;
@@ -261,6 +476,8 @@ namespace DafeiyuConsole
             lastAvatar = "";
             UpdateAvatar(mood, wasOnline ?? false);
         }
+
+        TrayIcon tray;
 
         void SetupTray()
         {
@@ -315,85 +532,6 @@ namespace DafeiyuConsole
         }
 
         // ── 主题 ──
-        public void ToggleTheme()
-        {
-            lightMode = !lightMode;
-            ApplyTheme(lightMode);
-            AppState.Save(this, lightMode);
-            ThemeBtn.Content = lightMode ? "🌙" : "☀";
-        }
-
-        void ThemeBtn_Click(object s, RoutedEventArgs e) => ToggleTheme();
-
-        void SetBrushColor(string key, Color color)
-        {
-            if (Application.Current.Resources[key] is SolidColorBrush b && !b.IsFrozen)
-                b.Color = color;
-        }
-
-        void ApplyTheme(bool light)
-        {
-            // 背景图
-            string name = light ? "bg-light.png" : "bg.png";
-            foreach (var dir in new[]
-            {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets"),
-                Path.Combine(Root, "console", "Assets")
-            })
-            {
-                var path = Path.Combine(dir, name);
-                if (!File.Exists(path)) continue;
-                try
-                {
-                    var bmp = new BitmapImage();
-                    bmp.BeginInit();
-                    bmp.CacheOption = BitmapCacheOption.OnLoad;
-                    bmp.DecodePixelWidth = 1280;
-                    bmp.UriSource = new Uri(path);
-                    bmp.EndInit();
-                    bmp.Freeze();
-                    BgImage.Source = bmp;
-                }
-                catch { }
-                break;
-            }
-
-            // 文字与强调色
-            SetBrushColor("TextBrush", light ? Color.FromRgb(43, 36, 64) : Color.FromRgb(205, 214, 244));
-            SetBrushColor("SubtextBrush", light ? Color.FromRgb(91, 82, 115) : Color.FromRgb(166, 173, 200));
-            SetBrushColor("OverlayBrush", light ? Color.FromRgb(138, 128, 166) : Color.FromRgb(108, 112, 134));
-            SetBrushColor("PinkBrush", light ? Color.FromRgb(210, 100, 154) : Color.FromRgb(245, 194, 231));
-            SetBrushColor("MauveBrush", light ? Color.FromRgb(124, 92, 214) : Color.FromRgb(203, 166, 247));
-
-            WordsText.Foreground = new SolidColorBrush(light
-                ? Color.FromRgb(43, 36, 64) : Color.FromRgb(251, 247, 255));
-            LogText.Foreground = new SolidColorBrush(light
-                ? Color.FromRgb(58, 51, 80) : Color.FromRgb(214, 201, 242));
-            DoingText.Foreground = new SolidColorBrush(light
-                ? Color.FromRgb(138, 128, 166) : Color.FromRgb(108, 112, 134));
-            HeroArt.Opacity = light ? 0.22 : 0.42;
-            if (tab == "log" && !string.IsNullOrEmpty(lastLogText)) RenderLogColored(lastLogText);
-
-            // 玻璃卡片：把白色半透明换成浅色主题下的深色半透明
-            if (FindResource("Glass") is Style glass)
-            {
-                foreach (var setter in glass.Setters)
-                {
-                    if (setter is Setter s && s.Property == Border.BackgroundProperty
-                        && s.Value is LinearGradientBrush lb)
-                    {
-                        byte[] alphas = { 0xC4, 0xB8, 0xB0 };
-                        for (int i = 0; i < lb.GradientStops.Count && i < 3; i++)
-                        {
-                            lb.GradientStops[i].Color = light
-                                ? Color.FromArgb(0xE6, 255, 255, 255)
-                                : Color.FromArgb(alphas[i], 26, 20, 48);
-                        }
-                    }
-                }
-            }
-        }
-
         void SnapToEdges()
         {
             var wa = SystemParameters.WorkArea;
@@ -450,32 +588,55 @@ namespace DafeiyuConsole
 
         static bool PortAlive(int port)
         {
+            var s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             try
             {
-                using var c = new TcpClient();
-                var ar = c.BeginConnect("127.0.0.1", port, null, null);
-                if (!ar.AsyncWaitHandle.WaitOne(250)) return false;
-                c.EndConnect(ar);
-                return c.Connected;
+                var task = s.ConnectAsync("127.0.0.1", port);
+                if (!task.Wait(220))
+                {
+                    // 超时后必须把这个任务的异常“消费”掉，
+                    // 否则会在后台抛 SocketException 995 并写进崩溃日志
+                    _ = task.ContinueWith(t => { _ = t.Exception; },
+                        TaskContinuationOptions.OnlyOnFaulted);
+                    return false;
+                }
+                return s.Connected;
             }
             catch { return false; }
+            finally { try { s.Dispose(); } catch { } }
         }
 
         void StartServerIfNeeded()
         {
-            if (PortAlive(8771)) return;
+            if (PortAlive(_ApiPort)) return;
             try
             {
-                var psi = new ProcessStartInfo(Python, "\"" + ServerScript + "\"")
+                if (!string.IsNullOrEmpty(CfgPath))
+                Environment.SetEnvironmentVariable("DAFEIYU_CONSOLE_CFG", CfgPath);
+            var psi = new ProcessStartInfo(
+                ServerIsExe ? ServerScript : Python,
+                ServerIsExe ? "" : "\"" + ServerScript + "\"")
                 {
                     WorkingDirectory = Root,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
                 Process.Start(psi);
-                for (int i = 0; i < 20 && !PortAlive(8771); i++) System.Threading.Thread.Sleep(150);
+                for (int i = 0; i < 40 && !PortAlive(_ApiPort); i++) System.Threading.Thread.Sleep(150);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                try
+                {
+                    var log = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "DafeiyuConsole", "crash.log");
+                    Directory.CreateDirectory(Path.GetDirectoryName(log));
+                    File.AppendAllText(log,
+                        "[" + DateTime.Now.ToString("s") + "] 启动后端失败: " + ex.Message + "\r\n");
+                }
+                catch { }
+            }
         }
 
         async Task<JsonElement?> Get(string path)
@@ -779,11 +940,23 @@ namespace DafeiyuConsole
             UpdateAvatar(mood, online);
 
             var procs = e.GetProperty("procs");
+            bool petInstalled = !procs.TryGetProperty("pet_installed", out var pi) || pi.GetBoolean();
             foreach (var kv in statusRows)
             {
                 bool ok = procs.TryGetProperty(kv.Key, out var p) && p.GetBoolean();
                 kv.Value.dot.Fill = (Brush)FindResource(ok ? "GreenBrush" : "OverlayBrush");
                 kv.Value.label.Foreground = (Brush)FindResource(ok ? "SubtextBrush" : "OverlayBrush");
+
+                // 桌宠没装就别显示成"掉线"，直接写"未装"
+                if (kv.Key == "pet" && !petInstalled)
+                {
+                    kv.Value.label.Text = "未装";
+                    kv.Value.label.ToolTip = "设置里可以把桌宠换成你自己的 exe，或者留空不用";
+                }
+                else if (kv.Key == "pet")
+                {
+                    kv.Value.label.Text = "桌宠";
+                }
             }
 
             if (e.TryGetProperty("days", out var days)) DrawSpark(days);
@@ -810,9 +983,27 @@ namespace DafeiyuConsole
                 : m > 0.10 ? "圆-左45.png"
                 : m < -0.20 ? "圆-左侧.png"
                 : "圆-正面.png");
+            // 用户自己放的头像优先：头像/avatar.png 或 头像/头像.png
+            foreach (var dir in AvatarDirs())
+            {
+                foreach (var custom in new[] { "avatar.png", "头像.png", "avatar.jpg", "头像.jpg" })
+                {
+                    var p2 = Path.Combine(dir, custom);
+                    if (File.Exists(p2)) { file = custom; break; }
+                }
+                if (file == "avatar.png" || file == "头像.png" || file == "avatar.jpg" || file == "头像.jpg")
+                    break;
+            }
+
             if (file == lastAvatar) return;
-            var path = Path.Combine(Root, "头像", file);
-            if (!File.Exists(path)) return;
+
+            string path = null;
+            foreach (var dir in AvatarDirs())
+            {
+                var cand = Path.Combine(dir, file);
+                if (File.Exists(cand)) { path = cand; break; }
+            }
+            if (path == null) return;
             try
             {
                 if (!avatarCache.TryGetValue(file, out var bmp))
@@ -833,6 +1024,7 @@ namespace DafeiyuConsole
             }
             catch { }
         }
+
 
         void DrawSpark(JsonElement days)
         {
@@ -911,7 +1103,7 @@ namespace DafeiyuConsole
                 return CWarn;
             if (line.TrimStart().StartsWith("⋯"))
                 return (Color)ColorConverter.ConvertFromString("#6C7086");
-            return lightMode ? (Color)ColorConverter.ConvertFromString("#3A3350") : CNormal;
+            return CNormal;
         }
 
         void RenderLogColored(string text)
@@ -1062,12 +1254,70 @@ namespace DafeiyuConsole
         }
         void Quit_Click(object s, RoutedEventArgs e) => Close();
 
-        void ToggleNotify()
+        /// <summary>重新读一遍背景图（换了文件之后调用）</summary>
+        void ReloadBackground()
         {
-            Toast("提醒开关保存在设置里");
-            OpenSettings();
+            foreach (var dir in AssetDirs())
+            {
+                var path = Path.Combine(dir, "bg.png");
+                if (!File.Exists(path)) continue;
+                try
+                {
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.UriSource = new Uri(path);
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    BgImage.Source = bmp;
+                    break;
+                }
+                catch { }
+            }
         }
 
+        void PickAvatar()
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "选一张头像",
+                Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.webp|所有文件|*.*"
+            };
+            if (dlg.ShowDialog() != true) return;
+            try
+            {
+                Program.Root = Root;
+                var crop = new CropWindow(dlg.FileName) { Owner = this };
+                if (crop.ShowDialog() != true || string.IsNullOrEmpty(crop.ResultPath))
+                    return;
+                avatarCache.Clear();
+                lastAvatar = "";
+                manualAvatar = "avatar.png";
+                UpdateAvatar(mood, wasOnline ?? false);
+                Toast("头像换好了");
+            }
+            catch (Exception e) { Toast("换头像失败：" + e.Message); }
+        }
+
+        void PickBackground()
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "选一张背景图",
+                Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.webp|所有文件|*.*"
+            };
+            if (dlg.ShowDialog() != true) return;
+            try
+            {
+                var dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets");
+                Directory.CreateDirectory(dir);
+                var dst = Path.Combine(dir, "bg.png");
+                File.Copy(dlg.FileName, dst, true);
+                ReloadBackground();
+                Toast("背景换好了（会自动铺满窗口）");
+            }
+            catch (Exception e) { Toast("换背景失败：" + e.Message); }
+        }
 
         void HardStop()
         {
@@ -1111,10 +1361,40 @@ namespace DafeiyuConsole
             t.Start();
         }
 
+        /// <summary>要启动机器人时先确认有 Python；没有就提示用户自己去装（不给链接）</summary>
+        bool NeedPython()
+        {
+            if (PythonFound) return true;
+            var box = MessageBox.Show(
+                "这台电脑上没有找到 Python。\n\n"
+                + "启动机器人需要 Python 3.8 或更高版本，请你自行下载安装。\n"
+                + "装好以后，可以在「设置 → Python」里手动指一下路径。\n\n"
+                + "要现在打开设置吗？",
+                "需要 Python",
+                MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (box == MessageBoxResult.Yes) OpenSettings();
+            return false;
+        }
+
+        /// <summary>第一次用：没配置也没找到机器人的话，直接把设置打开</summary>
+        void FirstRunHint()
+        {
+            bool hasCfg = File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "console.json"))
+                          || !string.IsNullOrEmpty(CfgPath);
+            bool hasBot = File.Exists(Path.Combine(Root, "config.json"));
+            if (hasCfg && hasBot) return;
+
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var w = new ConsoleSettingsWindow(Api, CfgPath) { Owner = this };
+                w.ShowDialog();
+            }));
+        }
+
         void OpenSettings()
         {
-            var w = new SettingsWindow(Root) { Owner = this };
-            if (w.ShowDialog() == true) { Toast("已保存，正在重启她"); _ = RefreshAsync(); }
+            var w = new ConsoleSettingsWindow(Api, CfgPath) { Owner = this };
+            w.ShowDialog();
         }
 
         void OpenMemories()

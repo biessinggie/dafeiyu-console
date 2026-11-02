@@ -1,0 +1,7 @@
+﻿# 控制台后端只需要标准库（console_server.py / pause_timer.py / watchdog.py 都不用第三方包）
+# 下面这些是「机器人本体」要用的，如果你用的是自己的 bot.py，按它的需要装
+
+websockets>=12.0          # 跟 NapCat 通信（OneBot v11）
+pillow>=10.0              # 表情包处理、图片缩放
+segno>=1.6                # 生成二维码
+requests>=2.31            # 部分网页抓取

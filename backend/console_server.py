@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """控制台后端：本地 HTTP 服务，给网页 UI 提供数据与操作
 
-只监听 127.0.0.1，端口 8771。
+只监听 127.0.0.1，端口默认 8771（可在 console.json 里改）。
 """
 import json
 import os
@@ -15,11 +15,104 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
-ROOT = Path(__file__).resolve().parent
+# 打包成 exe 后 __file__ 在临时解包目录，得用 exe 自己所在目录
+if getattr(sys, "frozen", False):
+    HERE = Path(sys.executable).resolve().parent
+else:
+    HERE = Path(__file__).resolve().parent
+
+
+# ── 读取 console.json（用户自己的环境配置，全都可以不填） ──
+def _load_cfg():
+    cands = []
+    env = os.environ.get("DAFEIYU_CONSOLE_CFG")
+    if env:
+        cands.append(Path(env))
+    cands += [HERE / "console.json", HERE.parent / "console.json"]
+    for c in cands:
+        try:
+            if c.exists():
+                return json.loads(c.read_text(encoding="utf-8-sig"))
+        except Exception:
+            pass
+    return {}
+
+
+CFG = _load_cfg()
+
+
+def _pick_python():
+    """找 Python：配置 → 正在跑的这个解释器（最可靠）→ 常见位置 → PATH"""
+    cfg = (CFG.get("python") or "").strip()
+    if cfg and Path(cfg).exists():
+        return cfg
+
+    # 后端自己就是被某个 Python 启动的，直接用它的同目录
+    # （但打包成 exe 后 sys.executable 是 exe 自己，不能算）
+    try:
+        exe = Path(sys.executable)
+        if getattr(sys, "frozen", False) or exe.name.lower().startswith("console_server"):
+            raise RuntimeError("frozen")
+        if exe.exists():
+            for n in ("pythonw.exe", "python.exe"):
+                cand = exe.parent / n
+                if cand.exists():
+                    return str(cand)
+    except Exception:
+        pass
+
+    bases = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python",
+        Path("C:/Program Files"),
+        Path("C:/"),
+    ]
+    for base in bases:
+        if not str(base) or not base.exists():
+            continue
+        try:
+            for d in sorted(base.glob("Python3*"), reverse=True):
+                for n in ("pythonw.exe", "python.exe"):
+                    exe = d / n
+                    if exe.exists():
+                        return str(exe)
+        except Exception:
+            pass
+
+    for n in ("pythonw.exe", "python.exe"):
+        w = shutil.which(n)
+        if w:
+            return w
+    return sys.executable or "pythonw.exe"
+
+
+_PY_FULL = _pick_python()
+_PY_DIR = Path(_PY_FULL).parent if Path(_PY_FULL).parent.exists() else None
+
+
+def _sibling(name):
+    if _PY_DIR:
+        p = _PY_DIR / name
+        if p.exists():
+            return str(p)
+    return _PY_FULL
+
+PY = _sibling("python.exe")
+PYW = _sibling("pythonw.exe")
+
+# 机器人的目录：配置里写了就用它，否则当脚本自己就在机器人目录
+ROOT = Path(CFG.get("bot_root") or HERE).expanduser()
+if not ROOT.exists():
+    ROOT = HERE
+
 UI = ROOT / "ui"
-PY = r"C:\Program Files\Python38\python.exe"
-PYW = r"C:\Program Files\Python38\pythonw.exe"
-PORT = 8771
+
+_PORTS = CFG.get("ports") or {}
+PORT = int(_PORTS.get("console", 8771))
+PET_PORT = int(_PORTS.get("pet_api", 8765))
+ONEBOT_PORT = int(_PORTS.get("onebot", 3001))
+PET_EXE = (CFG.get("pet_exe") or "BigBlueFish.exe").strip()
+BOT_SCRIPT = (CFG.get("bot_script") or "bot.py").strip()
+WATCH_SCRIPT = (CFG.get("watchdog") or "watchdog.py").strip()
 
 MODE_TEXT = {("priv", "group"): "都回", ("priv",): "只私聊",
              ("group",): "只群聊", (): "都不回"}
@@ -62,26 +155,26 @@ def cmdlines():
 
 
 def bot_running():
-    return "bot.py" in cmdlines()
+    return BOT_SCRIPT in cmdlines()
 
 
 def watchdog_running():
-    return "watchdog.py" in cmdlines()
+    return WATCH_SCRIPT in cmdlines()
 
 
 def port_connected():
     def run():
         for line in sh(["netstat", "-ano"]).splitlines():
-            if ":3001" in line and "ESTABLISHED" in line.upper():
+            if (":%d" % ONEBOT_PORT) in line and "ESTABLISHED" in line.upper():
                 return True
         return False
-    return cached("port3001", run)
+    return cached("port%d" % ONEBOT_PORT, run)
 
 
 def her_state():
     try:
         d = json.loads(urllib.request.urlopen(
-            "http://127.0.0.1:8765/state", timeout=2).read().decode("utf-8"))
+            "http://127.0.0.1:%d/state" % PET_PORT, timeout=2).read().decode("utf-8"))
         raw = (d.get("raw") or d.get("text") or "").strip()
         return raw, d.get("doing") or ""
     except Exception:
@@ -90,7 +183,7 @@ def her_state():
 
 def cfg():
     try:
-        return json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+        return json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
     except Exception:
         return {"bot": {}}
 
@@ -127,7 +220,7 @@ def state():
     up = ROOT / "data" / "usage.json"
     if up.exists():
         try:
-            d = json.loads(up.read_text(encoding="utf-8"))
+            d = json.loads(up.read_text(encoding="utf-8-sig"))
             usage = {"today": d.get("yuan", 0), "total": d.get("yuan_total", 0),
                      "turns": d.get("turns", 0)}
         except Exception:
@@ -138,7 +231,11 @@ def state():
         gp = ROOT / "data" / "group-memory.db"
         if gp.exists():
             db = sqlite3.connect(str(gp))
-            row = db.execute("SELECT mood FROM state WHERE chat='g:924922709'").fetchone()
+            last = db.execute(
+                "SELECT chat FROM messages WHERE chat LIKE 'g:%' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            chat_id = last[0] if last else ""
+            row = db.execute("SELECT mood FROM state WHERE chat=?", (chat_id,)).fetchone()
             mood = float(row[0]) if row and row[0] is not None else 0.0
             saved = db.execute("SELECT COUNT(*) FROM saved_posts").fetchone()[0]
             msgs = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
@@ -148,7 +245,7 @@ def state():
     dp = ROOT / "data" / "usage-days.json"
     if dp.exists():
         try:
-            dd = json.loads(dp.read_text(encoding="utf-8"))
+            dd = json.loads(dp.read_text(encoding="utf-8-sig"))
             import datetime as dtm
             today = dtm.date.today()
             for i in range(6, -1, -1):
@@ -162,7 +259,7 @@ def state():
         f_bot = ex.submit(bot_running)
         f_watch = ex.submit(watchdog_running)
         f_conn = ex.submit(port_connected)
-        f_pet = ex.submit(procs, "BigBlueFish.exe")
+        f_pet = ex.submit(procs, PET_EXE)
         pr = {"napcat": f_napcat.result(), "bot": f_bot.result(),
               "watch": f_watch.result(), "conn": f_conn.result(),
               "pet": f_pet.result()}
@@ -434,7 +531,7 @@ PAUSE_FILE = ROOT / "data" / "pause.json"
 
 def paused_until():
     try:
-        return float(json.loads(PAUSE_FILE.read_text(encoding="utf-8")).get("until", 0))
+        return float(json.loads(PAUSE_FILE.read_text(encoding="utf-8-sig")).get("until", 0))
     except Exception:
         return 0.0
 
@@ -452,7 +549,7 @@ def _kill_her(with_qq=False):
         "name='python.exe' and commandline like '%bot.py%'", "call", "terminate"])
     sh(["wmic", "process", "where",
         "name='pythonw.exe' and commandline like '%watchdog.py%'", "call", "terminate"])
-    sh(["taskkill", "/IM", "BigBlueFish.exe", "/F"])
+    sh(["taskkill", "/IM", PET_EXE, "/F"])
     if with_qq:
         sh(["taskkill", "/IM", "NapCatWinBootMain.exe", "/F"])
         try:
@@ -466,12 +563,39 @@ def _kill_her(with_qq=False):
             pass
 
 
+def python_ok():
+    """python 可执行文件到底存不存在"""
+    try:
+        return Path(PY).exists() or Path(PYW).exists()
+    except Exception:
+        return False
+
+
+def _pause_timer_main(target):
+    while True:
+        left = target - time.time()
+        if left <= 0:
+            break
+        time.sleep(min(20, max(1, left)))
+        if abs(paused_until() - target) > 1:
+            return
+    _write_pause(0)
+    try:
+        subprocess.Popen([PYW, str(ROOT / WATCH_SCRIPT)], cwd=str(ROOT))
+    except Exception:
+        pass
+
+
 def do_pause(until_ts):
     _kill_her()
     _write_pause(until_ts)
     try:
-        subprocess.Popen([PYW, str(ROOT / "pause_timer.py"), str(until_ts)],
-                         cwd=str(ROOT), creationflags=0x00000010)
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable, "--pause-timer", str(until_ts)],
+                             cwd=str(ROOT), creationflags=0x00000010)
+        else:
+            subprocess.Popen([PYW, str(HERE / "pause_timer.py"), str(until_ts)],
+                             cwd=str(ROOT), creationflags=0x00000010)
     except Exception:
         pass
     left = int((until_ts - time.time()) / 60)
@@ -480,16 +604,24 @@ def do_pause(until_ts):
 
 def do_resume():
     _write_pause(0)
-    if not watchdog_running():
-        subprocess.Popen([PYW, str(ROOT / "watchdog.py")], cwd=str(ROOT))
-    return "叫她回来了，几秒后上线"
+    if watchdog_running():
+        return "她已经在回来的路上了"
+    try:
+        subprocess.Popen([PYW, str(ROOT / WATCH_SCRIPT)], cwd=str(ROOT))
+    except Exception as e:  # noqa: BLE001
+        return "叫不回来：%s（Python=%s）" % (e, PYW)
+    for _ in range(10):
+        time.sleep(0.7)
+        if watchdog_running():
+            return "叫她回来了，几秒后上线"
+    return "叫了但没起来：%s（Python=%s）" % (ROOT / WATCH_SCRIPT, PYW)
 
 
 # ── 操作 ──
 def act(name):
     if name == "start":
         if not watchdog_running():
-            subprocess.Popen([PYW, str(ROOT / "watchdog.py")], cwd=str(ROOT))
+            subprocess.Popen([PYW, str(ROOT / WATCH_SCRIPT)], cwd=str(ROOT))
         if port_connected() and procs("NapCatWinBootMain.exe"):
             STARTUP.update(state="done", msg="她本来就在线", ts=time.time())
             return "已经在跑了"
@@ -529,10 +661,10 @@ def act(name):
         return "全部关掉了（连 QQ 一起）"
     if name == "diag":
         cs = [("NapCat", procs("NapCatWinBootMain.exe")), ("机器人", bot_running()),
-              ("看门狗", watchdog_running()), ("3001 连接", port_connected())]
+              ("看门狗", watchdog_running()), ("%d 连接" % ONEBOT_PORT, port_connected())]
         try:
             d = json.loads(urllib.request.urlopen(
-                "http://127.0.0.1:8765/state", timeout=3).read().decode("utf-8"))
+                "http://127.0.0.1:%d/state" % PET_PORT, timeout=3).read().decode("utf-8"))
             cs.append(("机器人接口", bool(d.get("ok"))))
         except Exception:
             cs.append(("机器人接口", False))
@@ -560,7 +692,7 @@ def act(name):
                 if (ROOT / f).exists():
                     z.write(ROOT / f, f)
             try:
-                d = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+                d = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
                 d["api"]["api_key"] = "已抹掉"
                 if "vision" in d["bot"]:
                     d["bot"]["vision"]["api_key"] = "已抹掉"
@@ -634,7 +766,7 @@ def say(text):
     try:
         body = json.dumps({"text": text, "token": "dafeiyu"}).encode("utf-8")
         req = urllib.request.Request(
-            "http://127.0.0.1:8765/say", data=body,
+            "http://127.0.0.1:%d/say" % PET_PORT, data=body,
             headers={"Content-Type": "application/json"}, method="POST")
         urllib.request.urlopen(req, timeout=8).read()
         return True
@@ -646,9 +778,10 @@ def save_settings(payload):
     p = ROOT / "config.json"
     d = cfg()
     b = d.setdefault("bot", {})
-    m = payload.get("mode", "group")
-    b["private_enabled"] = m in ("both", "priv")
-    b["reply_group"] = m in ("both", "group")
+    m = str(payload.get("mode", "group"))
+    both = ("both" in m) or ("priv" in m and "group" in m)
+    b["private_enabled"] = both or m == "priv"
+    b["reply_group"] = both or m == "group"
     for key in ["moments", "tieba", "miss"]:
         node = b.get(key)
         if isinstance(node, dict):
@@ -718,6 +851,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send({"items": memories(q.get("which", "group"))})
         if path == "/api/startup":
             return self._send(startup_state())
+        if path == "/api/settings":
+            u = dict(ui_cfg())
+            on = read_mode()
+            u["mode"] = ("both" if len(on) == 2 else (on[0] if on else ""))
+            try:
+                u["amb_pct"] = round(float(cfg().get("bot", {}).get("group_ambient_prob", 0.06)) * 100, 2)
+            except Exception:
+                u["amb_pct"] = 6.0
+            return self._send({"ok": True, "settings": u})
         if path == "/api/backups":
             return self._send({"items": backups()})
         if path == "/api/avatar":

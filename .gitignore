@@ -1,4 +1,4 @@
-﻿# 构建产物
+# 构建产物
 console/bin/
 console/obj/
 console/app/
@@ -17,11 +17,14 @@ data/
 __pycache__/
 *.pyc
 
-# 形象图（CC BY-NC-SA，不入库，自行下载）
+# 用户自己的形象图（第三方版权，不入库）
+# 仓库里的背景和图标是项目自绘的，正常提交
 头像/
-Assets/bg.png
-Assets/bg-light.png
 
 # 系统
 Thumbs.db
 desktop.ini
+
+# 本地发布产物
+build/
+

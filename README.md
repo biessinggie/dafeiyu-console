@@ -4,7 +4,16 @@
 
 .NET 8 + WPF，**不用浏览器内核**，空闲 CPU ≈ 3%、内存 ≈ 130MB。
 
-> 界面截图见 `docs/screenshots/`。
+> 界面截图见 `docs/screenshots/`：
+>
+> | | |
+> |---|---|
+> | ![主界面](docs/screenshots/01-overview.png) | ![换头像](docs/screenshots/02-crop-avatar.png) |
+> | 主界面（示例数据） | 换头像的圆形裁剪 |
+>
+> ![设置](docs/screenshots/04-settings.png)
+>
+> ![危险操作](docs/screenshots/03-danger-confirm.png)
 
 ---
 
@@ -14,18 +23,18 @@
 |---|---|
 | **运行** | 一键启动（先起 NapCat 再等二维码）、刷新二维码、重启机器人、连通检测、切换回复模式 |
 | **数据** | 备份记忆、还原最近备份、导出资料（zip，自动抹掉密钥）、直达导出/备份目录 |
+| **设置** | 一个窗口搞定：路径 / 端口 / API Key / 模式 / 头像 / 背景 |
 | **程序** | 查看/删除长期记忆、打开表情包目录、设置、静音提醒 |
 | **节奏** | 暂停 30 分钟 / 2 小时 / 到明早 8 点，**到点自动回来**；取消暂停 |
 | **危险** | 全部关闭（需要输入「全部关闭」四个字才生效） |
 
 还有：
 
-- **托盘图标**：左键唤出，右键菜单（显示 / 刷新二维码 / 设置 / 换主题 / 退出）
+- **托盘图标**：左键唤出，右键菜单（显示 / 刷新二维码 / 设置 / 退出）
 - **全局热键** `Ctrl + Alt + D`：任何窗口下唤出 / 收起
 - **F1 ~ F12** 全套快捷键
 - **窗口吸边**：拖到屏幕边缘 22px 内自动贴合
-- **深浅双主题**：顶栏 ☀/🌙 一键切换，背景同一张图，只改亮度与玻璃配色
-- **记住窗口位置和主题**（`%APPDATA%\DafeiyuConsole\window.json`）
+- **记住窗口位置**（`%APPDATA%\DafeiyuConsole\window.json`）
 - **崩溃自动重启 + 日志**（`%APPDATA%\DafeiyuConsole\crash.log`，只留最近 200KB）
 
 ---
@@ -35,7 +44,7 @@
 ```
 console/              C# WPF 前端（界面、快捷键、托盘）
   MainWindow.xaml         布局
-  MainWindow.xaml.cs      轮询、动作、热键、主题、吸边
+  MainWindow.xaml.cs      轮询、动作、热键、吸边、换头像/背景
   Windows.cs              设置 / 记忆 / 危险确认 三个弹窗
   Extras.cs               托盘、全局热键、窗口位置、开机自启
   Theme.xaml              配色与控件样式
@@ -79,7 +88,15 @@ dotnet publish -c Release -r win-x64 --self-contained false -o app
 
 ### 3. 准备后端
 
-把 `backend/` 里的三个脚本放到你的 bot 目录，与 `bot.py` 同级。
+两种方式，任选：
+
+**A. 用打包好的（推荐，不用装 Python）**
+
+把 `console_server.exe` 放到 `DafeiyuConsole.exe` 同目录即可。
+
+**B. 用脚本**
+
+把 `backend/` 里的脚本放到你的 bot 目录，与 `bot.py` 同级。
 
 后端会读这些路径（都在 bot 目录下）：
 
@@ -102,6 +119,13 @@ console\app\DafeiyuConsole.exe
 
 控制台会自动拉起后端（检测不到 8771 端口就自己起）。
 
+也可以直接用 Releases 里的压缩包：
+
+| 包 | 体积 | 需要装什么 |
+|---|---|---|
+| `DafeiyuConsole-轻量版.zip` | ~8 MB | .NET 8 Desktop Runtime |
+| `DafeiyuConsole-免安装版.zip` | ~70 MB | 什么都不用装 |
+
 ---
 
 ## 配置
@@ -110,7 +134,57 @@ console\app\DafeiyuConsole.exe
 
 **不要把带 Key 的 config.json 提交到仓库**（`.gitignore` 已经排掉了）。
 
+**API Key 可以在界面里填**（设置 → 接口），保存时只改这几个字段，其他配置原样保留：
+
+```json
+"api": { "base_url": "https://api.deepseek.com", "api_key": "sk-...", "model": "deepseek-flash" }
+```
+
+Key 输入框是密文显示，不会明文出现在界面上。
+
 控制台自己的偏好存在 `%APPDATA%\DafeiyuConsole\`，不进仓库。
+
+### 换头像 / 换背景
+
+界面里点「换头像」「换背景」即可，选完立刻生效，不用重启：
+
+- 头像存到 `头像/avatar.png`（圆形裁剪后 512×512）
+- 背景存到 `Assets/bg.png`
+
+也可以手动放文件（优先级从上到下）：
+
+```
+头像/avatar.png      ← 单张固定头像，优先
+头像/圆-正面.png      ← 按心情切换的一套
+Assets/bg.png        ← 背景
+```
+
+---
+
+## 换台电脑要填什么
+
+**基本什么都不用填。**
+
+| 项目 | 怎么找 |
+|---|---|
+| 机器人目录 | console.json → 往上找 `config.json` → exe 所在目录 |
+| Python | console.json → 注册表 `PythonCore` → `py -3` → 常见目录 → PATH → 后端自己的解释器 |
+| NapCat 脚本 | console.json → `../NapCat/1-启动NapCat.bat` |
+| 桌宠 | 默认 `BigBlueFish.exe`，没有就显示「未装」，不影响其它功能 |
+| 端口 | 默认 8771 / 8765 / 3001，都能在 `console.json` 改 |
+
+第一次启动如果没找到机器人，会自动弹出设置窗口让你选路径。
+
+高级用户可以直接写 `console.json`（放在 exe 同目录，或用环境变量 `DAFEIYU_CONSOLE_CFG` 指定）：
+
+```json
+{
+  "bot_root": "D:/mybot",
+  "python": "C:/Python311/pythonw.exe",
+  "pet_exe": "我的桌宠.exe",
+  "ports": { "console": 8771, "pet_api": 8765, "onebot": 3001 }
+}
+```
 
 ---
 

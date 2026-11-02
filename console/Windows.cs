@@ -7,294 +7,12 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Input;
+using System.Windows.Media.Imaging;
+using System.IO;
 
 namespace DafeiyuConsole
 {
-    public class SettingsWindow : Window
-    {
-        const string Api = "http://127.0.0.1:8771";
-        readonly HttpClient http = new HttpClient { Timeout = TimeSpan.FromSeconds(6) };
-        readonly string mode;
-        readonly Dictionary<string, bool> flags = new Dictionary<string, bool>();
-        readonly TextBox ambBox = new TextBox();
-        readonly TextBox budgetBox = new TextBox();
-        readonly StackPanel modeRow = new StackPanel { Orientation = Orientation.Horizontal };
-
-        public SettingsWindow(string root)
-        {
-            Title = "设置";
-            Width = 560; Height = 640;
-            WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            WindowStyle = WindowStyle.None; AllowsTransparency = true;
-            Background = Brushes.Transparent;
-            FontFamily = new FontFamily("Microsoft YaHei UI");
-
-            var json = SafeGetSync();
-            var s = json.HasValue ? json.Value.GetProperty("settings") : default;
-            mode = s.ValueKind == JsonValueKind.Object ? s.GetProperty("mode").GetString() : "group";
-
-            var root_ = new Border
-            {
-                CornerRadius = new CornerRadius(20),
-                Background = new SolidColorBrush(Color.FromRgb(24, 24, 37)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(26)
-            };
-            var panel = new StackPanel();
-
-            panel.Children.Add(new TextBlock
-            {
-                Text = "设置", FontSize = 19, FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(205, 214, 244)),
-                Margin = new Thickness(0, 0, 0, 6)
-            });
-            panel.Children.Add(Section("回复模式"));
-            modeRow.Margin = new Thickness(0, 4, 0, 6);
-            panel.Children.Add(modeRow);
-            foreach (var (v, t) in new[] { ("group", "只群聊"), ("priv", "只私聊"), ("both", "都回") })
-                modeRow.Children.Add(ModeButton(v, t));
-
-            panel.Children.Add(Section("程序"));
-            panel.Children.Add(ToggleRowLocal("开机自启", AppState.AutostartEnabled(),
-                v => AppState.SetAutostart(v)));
-
-            panel.Children.Add(Section("功能"));
-            foreach (var (key, label) in new[]
-            {
-                ("moments", "自己发说说"), ("tieba", "逛贴吧"), ("miss", "会想他"),
-                ("proactive", "主动搭话"), ("quiet", "夜里睡觉")
-            })
-            {
-                bool val = s.ValueKind == JsonValueKind.Object &&
-                           s.TryGetProperty(key, out var pv) && pv.GetBoolean();
-                flags[key] = val;
-                panel.Children.Add(ToggleRow(key, label, val));
-            }
-
-            panel.Children.Add(Section("数值"));
-            panel.Children.Add(NumberRow("插话概率 %", ambBox,
-                s.ValueKind == JsonValueKind.Object ? s.GetProperty("amb").GetInt32().ToString() : "6"));
-            panel.Children.Add(NumberRow("每日预算 ¥", budgetBox,
-                s.ValueKind == JsonValueKind.Object ? s.GetProperty("budget").GetDouble().ToString("0.0") : "1.0"));
-
-            var btns = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(0, 22, 0, 0)
-            };
-            btns.Children.Add(Btn("取消", false, () => { DialogResult = false; Close(); }));
-            btns.Children.Add(Btn("保存并重启", true, async () => await SaveAsync()));
-            panel.Children.Add(btns);
-
-            root_.Child = panel;
-            Content = root_;
-            MouseLeftButtonDown += (s2, e) => { if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) DragMove(); };
-        }
-
-        TextBlock Section(string t) => new TextBlock
-        {
-            Text = t, FontSize = 12, Margin = new Thickness(0, 16, 0, 6),
-            Foreground = new SolidColorBrush(Color.FromRgb(108, 112, 134))
-        };
-
-        Button ModeButton(string value, string text)
-        {
-            var b = Btn(text, value == mode, () =>
-            {
-                foreach (Button c in modeRow.Children)
-                {
-                    bool on = (string)c.Tag == value;
-                    c.Background = new SolidColorBrush(on
-                        ? Color.FromArgb(46, 245, 194, 231)
-                        : Color.FromArgb(12, 255, 255, 255));
-                    c.Foreground = new SolidColorBrush(on
-                        ? Color.FromRgb(245, 194, 231)
-                        : Color.FromRgb(166, 173, 200));
-                }
-            });
-            b.Tag = value;
-            b.Margin = new Thickness(0, 0, 8, 0);
-            b.Width = 100;
-            if (value != mode) b.Background = new SolidColorBrush(Color.FromArgb(12, 255, 255, 255));
-            return b;
-        }
-
-        FrameworkElement ToggleRow(string key, string label, bool value)
-        {
-            var g = new Grid { Margin = new Thickness(0, 4, 0, 4) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var t = new TextBlock
-            {
-                Text = label, FontSize = 13,
-                Foreground = new SolidColorBrush(Color.FromRgb(166, 173, 200)),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(t, 0);
-            g.Children.Add(t);
-
-            var sw = new Border
-            {
-                Width = 42, Height = 24, CornerRadius = new CornerRadius(12),
-                Background = new SolidColorBrush(value
-                    ? Color.FromRgb(203, 166, 247) : Color.FromArgb(30, 255, 255, 255)),
-                Cursor = System.Windows.Input.Cursors.Hand
-            };
-            var knob = new Border
-            {
-                Width = 18, Height = 18, CornerRadius = new CornerRadius(9),
-                Background = Brushes.White, HorizontalAlignment = value
-                    ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-                Margin = new Thickness(3)
-            };
-            sw.Child = knob;
-            sw.MouseLeftButtonUp += (_, __) =>
-            {
-                flags[key] = !flags[key];
-                sw.Background = new SolidColorBrush(flags[key]
-                    ? Color.FromRgb(203, 166, 247) : Color.FromArgb(30, 255, 255, 255));
-                knob.HorizontalAlignment = flags[key] ? HorizontalAlignment.Right : HorizontalAlignment.Left;
-            };
-            Grid.SetColumn(sw, 1);
-            g.Children.Add(sw);
-            return g;
-        }
-
-        FrameworkElement ToggleRowLocal(string label, bool value, Action<bool> onChange)
-        {
-            var g = new Grid { Margin = new Thickness(0, 4, 0, 4) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var t = new TextBlock
-            {
-                Text = label, FontSize = 13,
-                Foreground = new SolidColorBrush(Color.FromRgb(166, 173, 200)),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(t, 0);
-            g.Children.Add(t);
-            bool state = value;
-            var sw = new Border
-            {
-                Width = 42, Height = 24, CornerRadius = new CornerRadius(12),
-                Background = new SolidColorBrush(state
-                    ? Color.FromRgb(203, 166, 247) : Color.FromArgb(30, 255, 255, 255)),
-                Cursor = System.Windows.Input.Cursors.Hand
-            };
-            var knob = new Border
-            {
-                Width = 18, Height = 18, CornerRadius = new CornerRadius(9),
-                Background = Brushes.White,
-                HorizontalAlignment = state ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-                Margin = new Thickness(3)
-            };
-            sw.Child = knob;
-            sw.MouseLeftButtonUp += (_, __) =>
-            {
-                state = !state;
-                sw.Background = new SolidColorBrush(state
-                    ? Color.FromRgb(203, 166, 247) : Color.FromArgb(30, 255, 255, 255));
-                knob.HorizontalAlignment = state ? HorizontalAlignment.Right : HorizontalAlignment.Left;
-                onChange(state);
-            };
-            Grid.SetColumn(sw, 1);
-            g.Children.Add(sw);
-            return g;
-        }
-
-        FrameworkElement NumberRow(string label, TextBox box, string value)
-        {
-            var g = new Grid { Margin = new Thickness(0, 6, 0, 0) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var t = new TextBlock
-            {
-                Text = label, FontSize = 13,
-                Foreground = new SolidColorBrush(Color.FromRgb(166, 173, 200)),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(t, 0);
-            g.Children.Add(t);
-            box.Text = value; box.Width = 90; box.FontSize = 13;
-            box.Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255));
-            box.Foreground = new SolidColorBrush(Color.FromRgb(205, 214, 244));
-            box.BorderThickness = new Thickness(0);
-            box.Padding = new Thickness(8, 5, 8, 5);
-            Grid.SetColumn(box, 1);
-            g.Children.Add(box);
-            return g;
-        }
-
-        Button Btn(string text, bool primary, Action click)
-        {
-            var b = new Button
-            {
-                Content = text, Padding = new Thickness(16, 8, 16, 8),
-                Cursor = System.Windows.Input.Cursors.Hand,
-                FontSize = 13, BorderThickness = new Thickness(0),
-                Background = primary
-                    ? new LinearGradientBrush(Color.FromRgb(245, 194, 231), Color.FromRgb(203, 166, 247), 45)
-                    : new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
-                Foreground = primary
-                    ? new SolidColorBrush(Color.FromRgb(42, 16, 48))
-                    : new SolidColorBrush(Color.FromRgb(166, 173, 200))
-            };
-            var tpl = new ControlTemplate(typeof(Button));
-            var bd = new FrameworkElementFactory(typeof(Border));
-            bd.SetValue(Border.CornerRadiusProperty, new CornerRadius(12));
-            bd.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(BackgroundProperty));
-            bd.SetValue(Border.PaddingProperty, new TemplateBindingExtension(PaddingProperty));
-            var cp = new FrameworkElementFactory(typeof(ContentPresenter));
-            cp.SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center);
-            bd.AppendChild(cp);
-            tpl.VisualTree = bd;
-            b.Template = tpl;
-            b.Click += (_, __) => click();
-            return b;
-        }
-
-        JsonElement? SafeGetSync()
-        {
-            try
-            {
-                // 关键：ConfigureAwait(false) —— 否则 UI 线程同步等待会和自己死锁
-                var s = http.GetStringAsync(Api + "/api/state")
-                            .ConfigureAwait(false).GetAwaiter().GetResult();
-                using var d = JsonDocument.Parse(s);
-                return d.RootElement.Clone();
-            }
-            catch { return null; }
-        }
-
-        async Task SaveAsync()
-        {
-            string curMode = mode;
-            foreach (Button c in modeRow.Children)
-                if (c.Background is SolidColorBrush sb && sb.Color.A > 30) curMode = (string)c.Tag;
-
-            var payload = new Dictionary<string, object>
-            {
-                ["mode"] = curMode,
-                ["amb"] = int.TryParse(ambBox.Text, out var a) ? a : 6,
-                ["budget"] = double.TryParse(budgetBox.Text, out var b) ? b : 1.0
-            };
-            foreach (var kv in flags) payload[kv.Key] = kv.Value;
-            try
-            {
-                var json = JsonSerializer.Serialize(payload);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(6));
-                await http.PostAsync(Api + "/api/settings", content, cts.Token);
-            }
-            catch { }
-            DialogResult = true;
-            Close();
-        }
-    }
-
-
     /// <summary>需要输入文字才能确认的危险操作</summary>
     public class DangerWindow : Window
     {
@@ -414,6 +132,209 @@ namespace DafeiyuConsole
             b.Template = tpl;
             return b;
         }
+    }
+
+
+    /// <summary>换头像的裁剪窗口：拖动 + 滚轮缩放，圆形预览</summary>
+    public class CropWindow : Window
+    {
+        const int VIEW = 480;
+        readonly Image img = new Image { Stretch = Stretch.UniformToFill };
+        readonly ScaleTransform scale = new ScaleTransform(1, 1);
+        readonly TranslateTransform shift = new TranslateTransform(0, 0);
+        readonly Border frame;
+        Point dragStart;
+        bool dragging;
+
+        public string ResultPath { get; private set; }
+
+        public CropWindow(string srcPath)
+        {
+            Title = "裁剪头像";
+            Width = 560; Height = 660;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            WindowStyle = WindowStyle.None; AllowsTransparency = true;
+            Background = Brushes.Transparent;
+            FontFamily = new FontFamily("Microsoft YaHei UI");
+
+            var root = new Border
+            {
+                CornerRadius = new CornerRadius(20),
+                Background = new SolidColorBrush(Color.FromRgb(24, 20, 40)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(60, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(20)
+            };
+            var panel = new StackPanel();
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "调整头像", FontSize = 16, FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(235, 230, 255))
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = "拖动移动 · 滚轮缩放 · 圆形范围就是最终头像",
+                FontSize = 11.5, Margin = new Thickness(0, 6, 0, 14),
+                Foreground = new SolidColorBrush(Color.FromRgb(150, 142, 175))
+            });
+
+            // 圆形预览框
+            frame = new Border
+            {
+                Width = VIEW, Height = VIEW,
+                CornerRadius = new CornerRadius(VIEW / 2),
+                ClipToBounds = true,
+                Background = new SolidColorBrush(Color.FromRgb(16, 12, 28)),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            var tg = new TransformGroup();
+            tg.Children.Add(scale);
+            tg.Children.Add(shift);
+            img.RenderTransform = tg;
+            img.RenderTransformOrigin = new Point(0.5, 0.5);
+            img.Source = Load(srcPath);
+            frame.Child = img;
+
+            // 圆形描边
+            var ring = new Border
+            {
+                Width = VIEW, Height = VIEW,
+                CornerRadius = new CornerRadius(VIEW / 2),
+                BorderThickness = new Thickness(2),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(203, 166, 247)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                IsHitTestVisible = false
+            };
+            var stack = new Grid();
+            stack.Children.Add(frame);
+            stack.Children.Add(ring);
+            panel.Children.Add(stack);
+
+            // 缩放滑条
+            var slider = new Slider
+            {
+                Minimum = 0.6, Maximum = 3, Value = 1,
+                Margin = new Thickness(24, 16, 24, 0),
+                Foreground = new SolidColorBrush(Color.FromRgb(203, 166, 247))
+            };
+            slider.ValueChanged += (_, e) => scale.ScaleX = scale.ScaleY = e.NewValue;
+            panel.Children.Add(slider);
+
+            // 按钮
+            var bar = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 16, 0, 0)
+            };
+            var cancel = Btn("取消", false);
+            var ok = Btn("用这张", true);
+            cancel.Click += (_, __) => { DialogResult = false; Close(); };
+            ok.Click += (_, __) => Save();
+            bar.Children.Add(cancel);
+            bar.Children.Add(ok);
+            panel.Children.Add(bar);
+
+            root.Child = panel;
+            Content = root;
+
+            // 拖动
+            frame.MouseLeftButtonDown += (s, e) =>
+            {
+                dragging = true;
+                dragStart = e.GetPosition(frame);
+                frame.CaptureMouse();
+            };
+            frame.MouseMove += (s, e) =>
+            {
+                if (!dragging) return;
+                var p = e.GetPosition(frame);
+                shift.X += p.X - dragStart.X;
+                shift.Y += p.Y - dragStart.Y;
+                dragStart = p;
+            };
+            frame.MouseLeftButtonUp += (s, e) => { dragging = false; frame.ReleaseMouseCapture(); };
+            frame.MouseWheel += (s, e) =>
+            {
+                double v = scale.ScaleX + (e.Delta > 0 ? 0.08 : -0.08);
+                v = Math.Max(0.6, Math.Min(3, v));
+                scale.ScaleX = scale.ScaleY = v;
+                slider.Value = v;
+            };
+        }
+
+        static BitmapImage Load(string path)
+        {
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.UriSource = new Uri(path);
+            bmp.EndInit();
+            bmp.Freeze();
+            return bmp;
+        }
+
+        void Save()
+        {
+            try
+            {
+                // 把圆形框里的内容渲染成 512×512
+                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                    512, 512, 96, 96, PixelFormats.Pbgra32);
+                frame.UpdateLayout();
+                rtb.Render(frame);
+                var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+
+                var dir = Path.Combine(Program.Root, "头像");
+                Directory.CreateDirectory(dir);
+                ResultPath = Path.Combine(dir, "avatar.png");
+                using var fs = File.Create(ResultPath);
+                enc.Save(fs);
+                DialogResult = true;
+                Close();
+            }
+            catch (Exception e)
+            {
+                MessageBox.Show("保存失败：" + e.Message);
+            }
+        }
+
+        Button Btn(string text, bool primary)
+        {
+            var b = new Button
+            {
+                Content = text, FontSize = 13,
+                Padding = new Thickness(18, 8, 18, 8),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                BorderThickness = new Thickness(0),
+                Background = primary
+                    ? new SolidColorBrush(Color.FromRgb(203, 166, 247))
+                    : new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
+                Foreground = primary
+                    ? new SolidColorBrush(Color.FromRgb(30, 20, 50))
+                    : new SolidColorBrush(Color.FromRgb(190, 180, 205))
+            };
+            var tpl = new ControlTemplate(typeof(Button));
+            var bd = new FrameworkElementFactory(typeof(Border));
+            bd.SetValue(Border.CornerRadiusProperty, new CornerRadius(12));
+            bd.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(BackgroundProperty));
+            bd.SetValue(Border.PaddingProperty, new TemplateBindingExtension(PaddingProperty));
+            var cp = new FrameworkElementFactory(typeof(ContentPresenter));
+            cp.SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            bd.AppendChild(cp);
+            tpl.VisualTree = bd;
+            b.Template = tpl;
+            return b;
+        }
+    }
+
+    /// <summary>让弹窗能拿到机器人根目录</summary>
+    public static class Program
+    {
+        public static string Root = AppDomain.CurrentDomain.BaseDirectory;
     }
 
     public class MemoriesWindow : Window

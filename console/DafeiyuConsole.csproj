@@ -16,7 +16,7 @@
   <ItemGroup>
     <Resource Include="Assets\bg.png" />
     <Resource Include="Assets\app.ico" />
-    <Content Include="Assets\bg.png" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\bg.png" CopyToOutputDirectory="Always" />
+    <Content Include="Assets\app.ico" CopyToOutputDirectory="Always" />
   </ItemGroup>
 </Project>

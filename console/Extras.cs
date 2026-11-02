@@ -116,9 +116,7 @@ namespace DafeiyuConsole
             {
                 ("显示控制台", onShow),
                 ("刷新二维码", onQr),
-                ("设置", onSettings),
-                ("换主题", () => owner.Dispatcher.Invoke(() =>
-                    (owner as MainWindow)?.ToggleTheme()))
+                ("设置", onSettings)
             })
             {
                 var mi = new MenuItem { Header = text };
@@ -187,7 +185,7 @@ namespace DafeiyuConsole
             return null;
         }
 
-        public static void Save(Window w, bool light)
+        public static void Save(Window w)
         {
             try
             {
@@ -197,8 +195,7 @@ namespace DafeiyuConsole
                     Left = w.RestoreBounds.Left,
                     Top = w.RestoreBounds.Top,
                     Width = w.RestoreBounds.Width,
-                    Height = w.RestoreBounds.Height,
-                    Light = light
+                    Height = w.RestoreBounds.Height
                 };
                 File.WriteAllText(FilePath, JsonSerializer.Serialize(b));
             }

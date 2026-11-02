@@ -18,6 +18,7 @@
         <Grid>
             <Image x:Name="BgImage" Stretch="UniformToFill" Opacity="1"/>
 
+
             <!-- 背景立绘（二次元软件那种：人物在右侧，向左淡出） -->
             <Grid x:Name="ArtLayer" IsHitTestVisible="False" ClipToBounds="True" Visibility="Collapsed">
                 <Image x:Name="HeroArt" HorizontalAlignment="Right" VerticalAlignment="Bottom"
@@ -103,19 +104,12 @@
                                            FontSize="11" Margin="6,0,0,0"/>
                             </StackPanel>
                         </Border>
-                        <Button x:Name="ThemeBtn" Content="☀" Width="30" Height="26"
-                                Click="ThemeBtn_Click" Style="{StaticResource KeyButton}"
-                                HorizontalContentAlignment="Center" FontSize="12"
-                                ToolTip="切换深色 / 浅色"/>
-                        <Button x:Name="MinBtn" Content="—" Width="34" Height="26"
-                                Click="MinBtn_Click" Style="{StaticResource KeyButton}"
-                                HorizontalContentAlignment="Center" FontSize="13"/>
-                        <Button x:Name="MaxBtn" Content="□" Width="34" Height="26"
-                                Click="MaxBtn_Click" Style="{StaticResource KeyButton}"
-                                HorizontalContentAlignment="Center" FontSize="12"/>
-                        <Button x:Name="CloseBtn" Content="✕" Width="34" Height="26"
-                                Click="CloseBtn_Click" Style="{StaticResource KeyButton}"
-                                HorizontalContentAlignment="Center" FontSize="11"/>
+                        <Button x:Name="MinBtn" Content="—" Style="{StaticResource WindowButton}"
+                                Click="MinBtn_Click" ToolTip="最小化"/>
+                        <Button x:Name="MaxBtn" Content="▢" Style="{StaticResource WindowButton}"
+                                Click="MaxBtn_Click" ToolTip="最大化 / 还原"/>
+                        <Button x:Name="CloseBtn" Content="✕" Style="{StaticResource CloseButton}"
+                                Click="CloseBtn_Click" ToolTip="关闭"/>
                     </StackPanel>
                 </Grid>
 
@@ -215,7 +209,7 @@
                                                HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
 
-                                <TextBlock x:Name="Credit" Text="形象 · 大肥鱼设定 CC BY-NC-SA 4.0" FontSize="9"
+                                <TextBlock x:Name="Credit" Text="形象与背景可在「程序」里更换" FontSize="9"
                                            Foreground="#8A7FB0" HorizontalAlignment="Center"
                                            Margin="0,14,0,0"/>
                             </StackPanel>
