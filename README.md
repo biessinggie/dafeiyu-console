@@ -1,23 +1,45 @@
-# 大肥鱼控制台 · Dafeiyu Console
+<div align="center">
 
-一个给「自己养的 QQ 机器人」用的**原生桌面控制台**。
+# 大肥鱼控制台
 
-.NET 8 + WPF，**不用浏览器内核**，空闲 CPU ≈ 3%、内存 ≈ 130MB。
+**给「自己养的 QQ 机器人」用的原生桌面控制台**
 
-> 界面截图见 `docs/screenshots/`：
->
-> | | |
-> |---|---|
-> | ![主界面](docs/screenshots/01-overview.png) | ![换头像](docs/screenshots/02-crop-avatar.png) |
-> | 主界面（示例数据） | 换头像的圆形裁剪 |
->
-> ![设置](docs/screenshots/04-settings.png)
->
-> ![危险操作](docs/screenshots/03-danger-confirm.png)
+.NET 8 + WPF · 不用浏览器内核 · 空闲 CPU ≈ 3% · 内存 ≈ 130 MB
+
+[![Release](https://img.shields.io/github/v/release/biessinggie/dafeiyu-console?color=cba6f7&label=release)](https://github.com/biessinggie/dafeiyu-console/releases)
+[![License](https://img.shields.io/badge/license-MIT-89b4fa)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-8.0-512bd4)](https://dotnet.microsoft.com/)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078d4)](#)
+
+![主界面](docs/screenshots/01-overview.png)
+
+</div>
 
 ---
 
-## 它能做什么
+## 下载
+
+| 包 | 体积 | 需要装什么 |
+|---|---|---|
+| [**轻量版**](https://github.com/biessinggie/dafeiyu-console/releases/latest) | 8 MB | [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) |
+| [**免安装版**](https://github.com/biessinggie/dafeiyu-console/releases/latest) | 70 MB | 什么都不用装 |
+
+解压 → 双击 `DafeiyuConsole.exe` → 第一次会弹设置（选机器人目录、填 API Key）→ 点「启动全部」。
+
+Python 会自己找（注册表 / py 启动器 / 常见目录 / PATH），找不到才会提示你装。
+
+---
+
+## 截图
+
+| | |
+|---|---|
+| ![主界面](docs/screenshots/01-overview.png) | ![换头像](docs/screenshots/02-crop-avatar.png) |
+| 主界面（示例数据） | 换头像是圆形裁剪，可拖动缩放 |
+| ![设置](docs/screenshots/04-settings.png) | ![危险操作](docs/screenshots/03-danger-confirm.png) |
+| 一个窗口管所有设置 | 关掉她需要输入四个字 |
+
+ 它能做什么
 
 | 分类 | 能力 |
 |---|---|
