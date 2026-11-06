@@ -899,9 +899,39 @@ namespace DafeiyuConsole
             bool online = e.GetProperty("online").GetBoolean();
             mood = e.GetProperty("mood").GetDouble();
 
-            SetText(OnlineText, online ? "在线" : "离线");
-            OnlineDot.Fill = (Brush)FindResource(online ? "GreenBrush" : "RedBrush");
+            // 在线状态要分三档：真活跃 / 久无活动 / 多半掉线
+            double idleMin = e.TryGetProperty("idle_min", out var im) && im.ValueKind == JsonValueKind.Number
+                ? im.GetDouble() : -1;
+
+            string onlineText;
+            string dotBrush;
+            if (!online)
+            {
+                onlineText = "离线";
+                dotBrush = "RedBrush";
+            }
+            else if (idleMin < 0 || idleMin <= 8)
+            {
+                onlineText = "在线";
+                dotBrush = "GreenBrush";
+            }
+            else if (idleMin <= 30)
+            {
+                onlineText = string.Format("空闲 {0:0} 分", idleMin);
+                dotBrush = "YellowBrush";
+            }
+            else
+            {
+                onlineText = "可能掉线";
+                dotBrush = "RedBrush";
+            }
+
+            SetText(OnlineText, onlineText);
+            OnlineDot.Fill = (Brush)FindResource(dotBrush);
             StatusDot.Fill = (Brush)FindResource(online ? "GreenBrush" : "OverlayBrush");
+            OnlinePill.ToolTip = idleMin >= 0
+                ? string.Format("最近一次收发消息：{0:0} 分钟前", idleMin)
+                : "还没有消息记录";
             SetText(ModeChip, e.GetProperty("mode").GetString());
 
             string words = e.GetProperty("words").GetString();

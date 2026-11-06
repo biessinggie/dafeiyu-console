@@ -213,6 +213,61 @@ def read_mode(c=None):
     return tuple(on)
 
 
+def last_activity():
+    """最近一次真正收发消息的时间（从 NapCat 日志里找）
+    返回 (时间戳, 来源)；找不到返回 (0, "")
+    """
+    import re
+    from datetime import datetime
+
+    pat = re.compile(r"(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}).*(接收|发送)")
+    best = 0.0
+    src = ""
+    logs = []
+    # NapCat 可能在机器人目录里，也可能是同级目录（最常见）
+    bases = [ROOT / "NapCat", ROOT.parent / "NapCat", ROOT / "napcat"]
+    cfg_bat = (CFG.get("napcat_bat") or "").strip()
+    if cfg_bat:
+        bases.insert(0, Path(cfg_bat).parent)
+    for base in bases:
+        try:
+            if not base.exists():
+                continue
+            for d in (base / "bootmain" / "logs", base):
+                if d.exists():
+                    logs += sorted(d.glob("*.log"),
+                                   key=lambda x: x.stat().st_mtime, reverse=True)[:2]
+            if logs:
+                break
+        except Exception:
+            pass
+    for lg in logs:
+        try:
+            tail = lg.read_text(encoding="utf-8", errors="ignore").splitlines()[-400:]
+        except Exception:
+            continue
+        for line in reversed(tail):
+            m = pat.search(line)
+            if not m:
+                continue
+            mm, dd, HH, MM, SS = (int(m.group(i)) for i in range(1, 6))
+            try:
+                dt = datetime(datetime.now().year, mm, dd, HH, MM, SS)
+                ts = dt.timestamp()
+            except Exception:
+                continue
+            if ts > best:
+                best, src = ts, lg.name
+            break
+    # bot.log 的修改时间也參與比較
+    bp = ROOT / "data" / "bot.log"
+    if bp.exists():
+        mt = bp.stat().st_mtime
+        if mt > best:
+            best, src = mt, "bot.log"
+    return best, src
+
+
 def state():
     c = cfg()
     words, doing = her_state()
@@ -264,8 +319,14 @@ def state():
               "watch": f_watch.result(), "conn": f_conn.result(),
               "pet": f_pet.result()}
 
+    la_ts, la_src = last_activity()
+    idle_min = round((time.time() - la_ts) / 60.0, 1) if la_ts else -1
+
     return {
         "online": pr["conn"] and pr["bot"],
+        "last_activity": la_ts,
+        "idle_min": idle_min,
+        "activity_src": la_src,
         "mode": MODE_TEXT.get(read_mode(c), "未知"),
         "words": words, "doing": doing, "mood": mood,
         "today": usage["today"], "total": usage["total"],
